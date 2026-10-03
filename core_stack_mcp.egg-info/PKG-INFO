@@ -1,0 +1,98 @@
+Metadata-Version: 2.4
+Name: core-stack-mcp
+Version: 0.1.0
+Summary: FastAPI MCP server for the CoRE Stack public API, with Postgres access logs.
+Requires-Python: >=3.11
+Description-Content-Type: text/markdown
+Requires-Dist: asyncpg>=0.30
+Requires-Dist: fastapi>=0.115
+Requires-Dist: httpx>=0.27
+Requires-Dist: mcp<3,>=2.3
+Requires-Dist: pydantic-settings>=2.6
+Requires-Dist: sqlalchemy[asyncio]>=2.0.36
+Requires-Dist: uvicorn[standard]>=0.32
+Provides-Extra: dev
+Requires-Dist: aiosqlite>=0.20; extra == "dev"
+Requires-Dist: pytest>=8; extra == "dev"
+Requires-Dist: pytest-asyncio>=0.24; extra == "dev"
+
+# CoRE Stack MCP
+
+FastAPI server that exposes the CoRE Stack public APIs as MCP tools. Postgres records who called the server.
+
+The MCP endpoint is `http://127.0.0.1:8080/mcp`. Callers send their CoRE Stack API key in `X-API-Key`. The key is forwarded to CoRE Stack and stored only as a SHA-256 fingerprint plus the last four characters.
+
+## Run
+
+```bash
+docker compose up --build
+```
+
+Postgres listens on port 5432 (`corestack` / `corestack`, database `corestack_mcp`). The API listens on port 8080.
+
+Without Docker, copy `.env.example` to `.env`, start Postgres, then:
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -e ".[dev]"
+uvicorn app.main:app --host 127.0.0.1 --port 8080
+```
+
+`GET /health` checks Postgres.
+
+## Cursor
+
+```json
+{
+  "mcpServers": {
+    "corestack": {
+      "url": "http://127.0.0.1:8080/mcp",
+      "headers": {
+        "X-API-Key": "<corestack-api-key>",
+        "X-Client-Name": "your-name"
+      }
+    }
+  }
+}
+```
+
+`X-Client-Name` is the name written on the access log. Use a different name for each person or agent when they share one API key.
+
+## Tools
+
+- `list_public_apis` — route ids this server can call
+- `describe_public_api` — path, description, and query parameters for one id
+- `call_public_api` — calls that CoRE Stack v2 route
+
+Place names must be the State, District, and Tehsil from `get_active_locations` or `get_admin_details_by_latlon`. Tehsil datasets use `data`. Micro-watershed time series and Know Your Landscape indicators use `fields`.
+
+## Access log
+
+Every request except `GET /health` inserts a row in `access_logs` and updates `clients`.
+
+Each row stores:
+
+- time, request id, duration
+- client name (`X-Client-Name`)
+- API key fingerprint and last four characters, never the key
+- source IP, `X-Forwarded-For` when `TRUST_PROXY=true`, user agent
+- HTTP method, path, status code
+- MCP method (`initialize`, `tools/list`, `tools/call`), tool name, and arguments with secrets removed
+- outcome (`success`, `client_error`, `upstream_error`, `missing_api_key`, `error`)
+- upstream CoRE Stack status code and response size
+
+The same line is written to the process log.
+
+Set `ADMIN_TOKEN` to read the log:
+
+```bash
+curl -H "X-Admin-Token: $ADMIN_TOKEN" http://127.0.0.1:8080/clients
+curl -H "X-Admin-Token: $ADMIN_TOKEN" "http://127.0.0.1:8080/access-logs?limit=50"
+```
+
+If `ADMIN_TOKEN` is empty, those two routes answer 404.
+
+## Production hostname
+
+Leave `MCP_ALLOWED_HOSTS` empty to accept only localhost. Set it to the public host, for example `mcp.core-stack.org`, before serving any other name. `MCP_ALLOWED_HOSTS=*` turns the host check off and is only appropriate behind a trusted proxy.

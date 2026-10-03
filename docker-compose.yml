@@ -1,0 +1,35 @@
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: corestack
+      POSTGRES_PASSWORD: corestack
+      POSTGRES_DB: corestack_mcp
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U corestack -d corestack_mcp"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  mcp:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://corestack:corestack@db:5432/corestack_mcp
+      CORE_STACK_BASE_URL: https://geoserver.core-stack.org
+      CORE_STACK_API_KEY: ${CORE_STACK_API_KEY:-}
+      # * accepts the Host header Docker and local clients send. Set a real hostname in production.
+      MCP_ALLOWED_HOSTS: "*"
+      ADMIN_TOKEN: ${ADMIN_TOKEN:-}
+      TRUST_PROXY: "false"
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pgdata:

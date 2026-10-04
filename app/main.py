@@ -7,6 +7,7 @@ import httpx
 from fastapi import Depends, FastAPI, Header, HTTPException, Query
 from mcp.server.transport_security import TransportSecuritySettings
 from sqlalchemy import desc, select
+from sqlalchemy.engine.url import make_url
 
 from app.config import get_settings
 from app.corestack import set_http_client
@@ -50,7 +51,9 @@ mcp_asgi = mcp.streamable_http_app(
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    init_engine(settings.database_url)
+    database_url = settings.resolved_database_url()
+    logger.info("connecting to Postgres host=%s", make_url(database_url).host)
+    init_engine(database_url)
     await create_tables()
     client = httpx.AsyncClient(timeout=settings.upstream_timeout_seconds)
     set_http_client(client)

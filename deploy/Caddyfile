@@ -1,3 +1,8 @@
-{$MCP_HOST} {
+{
+	# Port 443 on this machine is already nginx. Do not redirect to it.
+	auto_https off
+}
+
+http://{$MCP_HOST} {
 	reverse_proxy mcp:8080
 }

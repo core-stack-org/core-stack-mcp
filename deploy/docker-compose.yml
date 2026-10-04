@@ -36,7 +36,7 @@ services:
     ports:
       # Host ports 80 and 443 are already in use on the server.
       - "8094:80"
-      - "8443:443"
+      - "8494:443"
     environment:
       MCP_HOST: ${MCP_HOST}
     volumes:

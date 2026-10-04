@@ -4,10 +4,16 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.catalog import public_api
-from app.corestack import call_api
+from app.corestack import call_api, normalize_base_url
 from app.identity import CallOutcome, RequestIdentity, identity_var, outcome_var
 from app.main import app
 from app.redact import fingerprint_api_key, parse_mcp_message, redact
+
+
+def test_base_url_strips_slash_and_rejects_a_bad_host():
+    assert normalize_base_url("https://uat.core-stack.org:444/") == "https://uat.core-stack.org:444"
+    with pytest.raises(ValueError):
+        normalize_base_url("not a url")
 
 
 def test_api_key_is_fingerprinted_and_not_reversible():
@@ -72,6 +78,23 @@ async def test_call_requires_an_api_key():
 
 def test_health_and_access_log():
     with TestClient(app) as client:
+        mcp_response = client.post(
+            "/mcp",
+            json={
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": "2025-03-26",
+                    "capabilities": {},
+                    "clientInfo": {"name": "pytest", "version": "0"},
+                },
+            },
+            headers={"Accept": "application/json, text/event-stream"},
+            follow_redirects=False,
+        )
+        assert mcp_response.status_code != 307
+
         health = client.get("/health")
         assert health.status_code == 200
         assert health.json()["status"] == "ok"

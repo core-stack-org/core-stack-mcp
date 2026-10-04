@@ -12,7 +12,7 @@ from app.config import get_settings
 from app.corestack import set_http_client
 from app.db import create_tables, dispose_engine, init_engine, session_factory
 from app.mcp_app import mcp
-from app.middleware import AccessLogMiddleware
+from app.middleware import AccessLogMiddleware, McpSlashMiddleware
 from app.models import AccessLog, Client
 
 logger = logging.getLogger("corestack")
@@ -69,6 +69,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 app.add_middleware(AccessLogMiddleware)
+app.add_middleware(McpSlashMiddleware)
 
 
 def require_admin(x_admin_token: str | None = Header(default=None)) -> None:

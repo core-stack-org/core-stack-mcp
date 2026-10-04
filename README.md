@@ -27,14 +27,14 @@ That starts Postgres and the MCP server.
 
 | Service | Address | Login |
 | --- | --- | --- |
-| MCP | http://127.0.0.1:8080/mcp | CoRE Stack API key in `X-API-Key` |
-| Health | http://127.0.0.1:8080/health | none |
-| Postgres | `localhost:5432` | user `corestack`, password `corestack`, database `corestack_mcp` |
+| MCP | http://127.0.0.1:8081/mcp | CoRE Stack API key in `X-API-Key` |
+| Health | http://127.0.0.1:8081/health | none |
+| Postgres | `localhost:5433` | user `corestack`, password `corestack`, database `corestack_mcp`. Host port 5433, because 5432 is often already taken |
 
 Check that Postgres is up:
 
 ```bash
-curl http://127.0.0.1:8080/health
+curl http://127.0.0.1:8081/health
 ```
 
 A healthy server answers `{"status":"ok"}`.
@@ -83,6 +83,7 @@ cp deploy/.env.example deploy/.env
 | `POSTGRES_PASSWORD` | A long password. Avoid `@`, `:`, `/`, and `?` because it is placed in the database URL |
 | `ADMIN_TOKEN` | A long token for reading the access log |
 | `CORE_STACK_API_KEY` | Leave empty. Each Cursor user sends their own key |
+| `CORE_STACK_BASE_URL` | CoRE Stack API origin this server calls when a client does not send `X-Core-Stack-Base-Url`. Use `https://geoserver.core-stack.org` or `https://uat.core-stack.org:444`. No path |
 
 3. Confirm the DNS record answers with this server's IP, then start the stack from the repository root:
 
@@ -98,21 +99,48 @@ curl https://mcp.core-stack.org/health
 
 A healthy server answers `{"status":"ok"}`. Caddy can take a minute to issue the certificate on the first start.
 
-5. Point Cursor at the public MCP URL:
+5. Point Cursor at the public MCP URL. `X-Core-Stack-Base-Url` is the CoRE Stack API this person calls. It can differ from `CORE_STACK_BASE_URL` on the server.
 
 ```json
 {
   "mcpServers": {
     "corestack": {
-      "url": "https://mcp.core-stack.org/mcp",
+      "url": "https://mcp.core-stack.org/mcp/",
       "headers": {
         "X-API-Key": "<corestack-api-key>",
-        "X-Client-Name": "your-name"
+        "X-Client-Name": "your-name",
+        "X-Core-Stack-Base-Url": "https://uat.core-stack.org:444"
       }
     }
   }
 }
 ```
+
+### Change the CoRE Stack endpoint
+
+Two places set the API origin. Neither one includes `/api/v2`.
+
+**Everyone on this server.** Edit `deploy/.env`:
+
+```bash
+CORE_STACK_BASE_URL=https://uat.core-stack.org:444
+```
+
+Use `https://geoserver.core-stack.org` for the public host. Then recreate the MCP container. A rebuild is not required:
+
+```bash
+docker compose --env-file deploy/.env -f deploy/docker-compose.yml up -d
+```
+
+That value is the default. Cursor uses it when `X-Core-Stack-Base-Url` is absent.
+
+**One Cursor user.** Change the header and restart Cursor:
+
+```json
+"X-Core-Stack-Base-Url": "https://geoserver.core-stack.org"
+```
+
+Send `X-API-Key` on that same connection. The header is the host that key is sent to. On your own machine the same header works in `~/.cursor/mcp.json`, and the local default is `CORE_STACK_BASE_URL` in `.env` next to `docker-compose.yml`.
 
 `MCP_HOST` is also the host allowlist. If it does not match the name in the browser or in Cursor, the MCP endpoint answers `421 Misdirected Request` and the reason is only in the container log. Read it with:
 
@@ -128,7 +156,7 @@ curl -H "X-Admin-Token: $ADMIN_TOKEN" https://mcp.core-stack.org/clients
 
 To ship a new version, copy the new code to the server and run the same `docker compose up -d --build` command. Postgres data stays in the `pgdata` volume. Tables are created on startup; existing rows are kept.
 
-Do not use the root `docker compose up` command on a public server. That file publishes Postgres on port 5432 with the password `corestack` and turns the host check off.
+Do not use the root `docker compose up` command on a public server. That file publishes Postgres on port 5433 with the password `corestack` and turns the host check off.
 
 ## Connect from Cursor
 
@@ -138,10 +166,11 @@ Add this to `~/.cursor/mcp.json` and restart Cursor:
 {
   "mcpServers": {
     "corestack": {
-      "url": "http://127.0.0.1:8080/mcp",
+      "url": "http://127.0.0.1:8081/mcp/",
       "headers": {
         "X-API-Key": "<corestack-api-key>",
-        "X-Client-Name": "your-name"
+        "X-Client-Name": "your-name",
+        "X-Core-Stack-Base-Url": "https://uat.core-stack.org:444"
       }
     }
   }
@@ -149,6 +178,8 @@ Add this to `~/.cursor/mcp.json` and restart Cursor:
 ```
 
 `X-Client-Name` is the name written in the access log. Give each person or agent their own name when they share one API key.
+
+`X-Core-Stack-Base-Url` chooses which CoRE Stack host this connection calls. Change it to `https://geoserver.core-stack.org` or another host, then restart Cursor. Omit the header to use the server's `CORE_STACK_BASE_URL`. Send `X-API-Key` on the same connection. The server fallback key is only sent to `CORE_STACK_BASE_URL`.
 
 Do not put the API key in a tool argument. The server reads it from the header and forwards it to CoRE Stack.
 
@@ -217,8 +248,8 @@ Argument fields named `api_key`, `token`, `password`, `secret`, or `authorizatio
 Set `ADMIN_TOKEN`, then:
 
 ```bash
-curl -H "X-Admin-Token: $ADMIN_TOKEN" http://127.0.0.1:8080/clients
-curl -H "X-Admin-Token: $ADMIN_TOKEN" "http://127.0.0.1:8080/access-logs?limit=50"
+curl -H "X-Admin-Token: $ADMIN_TOKEN" http://127.0.0.1:8081/clients
+curl -H "X-Admin-Token: $ADMIN_TOKEN" "http://127.0.0.1:8081/access-logs?limit=50"
 ```
 
 If `ADMIN_TOKEN` is empty, both routes answer 404.
@@ -228,7 +259,7 @@ If `ADMIN_TOKEN` is empty, both routes answer 404.
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `DATABASE_URL` | `postgresql+asyncpg://corestack:corestack@localhost:5432/corestack_mcp` | Access-log database. Inside Compose the host is `db` |
-| `CORE_STACK_BASE_URL` | `https://geoserver.core-stack.org` | CoRE Stack host |
+| `CORE_STACK_BASE_URL` | `https://geoserver.core-stack.org` | Default CoRE Stack host. A connection can override it with `X-Core-Stack-Base-Url` |
 | `CORE_STACK_API_KEY` | empty | Fallback key when the request has no `X-API-Key` |
 | `MCP_ALLOWED_HOSTS` | empty | Hostnames this server accepts. Empty means localhost only |
 | `ADMIN_TOKEN` | empty | Required to read `/access-logs` and `/clients` |

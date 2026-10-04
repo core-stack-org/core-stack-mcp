@@ -7,6 +7,7 @@ from typing import Any
 
 from app.access import safe_record_access
 from app.config import get_settings
+from app.corestack import normalize_base_url
 from app.identity import CallOutcome, RequestIdentity, identity_var, outcome_var
 from app.redact import fingerprint_api_key, parse_mcp_message
 
@@ -32,6 +33,21 @@ def _client_ip(scope: dict) -> tuple[str | None, str | None]:
     return direct, forwarded
 
 
+class McpSlashMiddleware:
+    """Serve ``/mcp`` at the path Cursor calls. Starlette otherwise redirects it to ``/mcp/``."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http" and scope.get("path") == "/mcp":
+            scope = dict(scope)
+            scope["path"] = "/mcp/"
+            if scope.get("raw_path") == b"/mcp":
+                scope["raw_path"] = b"/mcp/"
+        await self.app(scope, receive, send)
+
+
 class AccessLogMiddleware:
     def __init__(self, app):
         self.app = app
@@ -53,6 +69,14 @@ class AccessLogMiddleware:
         header_key = _header(scope, "x-api-key")
         api_key = header_key or get_settings().core_stack_api_key.strip() or None
         fingerprint, hint = fingerprint_api_key(api_key)
+        raw_base_url = _header(scope, "x-core-stack-base-url")
+        base_url = None
+        base_url_error = None
+        if raw_base_url:
+            try:
+                base_url = normalize_base_url(raw_base_url)
+            except ValueError as exc:
+                base_url_error = str(exc)
         identity = RequestIdentity(
             request_id=_header(scope, "x-request-id") or str(uuid.uuid4()),
             client_name=_header(scope, "x-client-name"),
@@ -62,6 +86,9 @@ class AccessLogMiddleware:
             source_ip=source_ip,
             forwarded_for=forwarded,
             user_agent=_header(scope, "user-agent"),
+            api_key_from_header=bool(header_key),
+            core_stack_base_url=base_url,
+            core_stack_base_url_error=base_url_error,
         )
         outcome = CallOutcome()
         identity_token = identity_var.set(identity)

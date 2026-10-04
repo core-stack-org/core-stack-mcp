@@ -14,6 +14,9 @@ class RequestIdentity:
     source_ip: str | None
     forwarded_for: str | None
     user_agent: str | None
+    api_key_from_header: bool = False
+    core_stack_base_url: str | None = None
+    core_stack_base_url_error: str | None = None
 
 
 @dataclass

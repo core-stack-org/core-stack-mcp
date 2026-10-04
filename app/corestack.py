@@ -3,6 +3,7 @@
 import json
 import logging
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 
@@ -18,6 +19,17 @@ _client: httpx.AsyncClient | None = None
 def set_http_client(client: httpx.AsyncClient | None) -> None:
     global _client
     _client = client
+
+
+def normalize_base_url(value: str) -> str:
+    """Accept an http(s) CoRE Stack origin and drop a trailing slash."""
+    text = value.strip().rstrip("/")
+    parsed = urlparse(text)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        raise ValueError("CoRE Stack base URL must be an http or https URL with a host")
+    if parsed.username or parsed.password:
+        raise ValueError("CoRE Stack base URL must not include a username or password")
+    return text
 
 
 def _api_key() -> str | None:
@@ -77,7 +89,24 @@ async def call_api(api_id: str, params: dict[str, Any] | None = None) -> dict[st
         }
 
     settings = get_settings()
-    url = settings.core_stack_base_url.rstrip("/") + api.path
+    identity = current_identity()
+    if identity and identity.core_stack_base_url_error:
+        outcome.outcome = "client_error"
+        outcome.error_message = identity.core_stack_base_url_error
+        return {"status_code": 400, "error": identity.core_stack_base_url_error}
+    if identity and identity.core_stack_base_url:
+        if not identity.api_key_from_header:
+            message = (
+                "Send X-API-Key together with X-Core-Stack-Base-Url. "
+                "The server fallback key is only sent to CORE_STACK_BASE_URL."
+            )
+            outcome.outcome = "client_error"
+            outcome.error_message = message
+            return {"status_code": 400, "error": message}
+        base_url = identity.core_stack_base_url
+    else:
+        base_url = normalize_base_url(settings.core_stack_base_url)
+    url = base_url + api.path
     client = _client or httpx.AsyncClient(timeout=settings.upstream_timeout_seconds)
     close_client = _client is None
     try:

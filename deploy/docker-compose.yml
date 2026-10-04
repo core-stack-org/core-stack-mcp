@@ -20,7 +20,7 @@ services:
     build:
       context: ..
     environment:
-      DATABASE_URL: postgresql+asyncpg://corestack:${POSTGRES_PASSWORD}@db:5432/corestack_mcp
+      DATABASE_URL: postgresql+asyncpg://corestack:${POSTGRES_PASSWORD}@db:5432/corestack_mcp?ssl=disable
       CORE_STACK_BASE_URL: ${CORE_STACK_BASE_URL:-https://geoserver.core-stack.org}
       CORE_STACK_API_KEY: ${CORE_STACK_API_KEY:-}
       MCP_ALLOWED_HOSTS: ${MCP_HOST}

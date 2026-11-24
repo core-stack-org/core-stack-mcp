@@ -185,46 +185,48 @@ Do not put the API key in a tool argument. The server reads it from the header a
 
 ## How an agent should call data
 
-1. `list_public_apis` to see the route ids.
-2. `describe_public_api` with one id, for example `get_tehsil_data`.
+1. `list_public_apis` to see the route ids, paths, and parameter names.
+2. `describe_public_api` with one id (for example `get_tehsil_data`) when you need parameter types, required flags, allowed values (such as all `data=` dataset names), an example call, response fields with units, or code legends.
 3. `call_public_api` with that id and a flat `params` object.
 
 Place names must be the State, District, and Tehsil that CoRE Stack uses. Get them from `get_active_locations`, or from `get_admin_details_by_latlon` when you start with a coordinate.
 
-Example: drought rows for one tehsil.
+Example: annual cropping intensity rows for one tehsil.
 
 ```json
 {
   "api_id": "get_tehsil_data",
   "params": {
     "state": "Uttar Pradesh",
-    "district": "Balrampur",
-    "tehsil": "Tulsipur",
-    "data": "drought"
+    "district": "Jaunpur",
+    "tehsil": "Badlapur",
+    "data": "croppingintensity_annual"
   }
 }
 ```
 
-Omit `data`, or pass `data=all`, to receive every dataset CoRE Stack generated for that tehsil. A tehsil file may contain only some of the datasets. Pass `fields` on `get_mws_data` and `get_mws_kyl_indicators`, for example `et,runoff`.
+Always pass `data=` with one or two dataset names on `get_tehsil_data` (call `describe_public_api("get_tehsil_data")` for the full list of valid dataset names). Omitting `data` or passing `data=all` is too large for an agent and will be truncated. Pass `fields` on `get_mws_data` and `get_mws_kyl_indicators`, for example `et,runoff`.
+
+Geometry routes (`get_mws_geometries`, `get_village_geometries`) return feature properties/IDs and bounding boxes (`bbox`) by default. Pass optional `mws_id` or `village_id` in `params` to fetch a single feature, and pass `"include_geometry": true` on `call_public_api` when full polygon coordinates are required.
 
 ## Routes
 
 | api_id | Parameters | What it returns |
 | --- | --- | --- |
-| `get_active_locations` | `state`, `district`, `tehsil` (all optional) | States, districts, and tehsils that already have CoRE Stack data |
+| `get_active_locations` | `state`, `district`, `tehsil`, `block` (all optional; `block` aliases `tehsil`) | States, districts, and tehsils that already have CoRE Stack data |
 | `get_admin_details_by_latlon` | `latitude`, `longitude` | State, District, and Tehsil names for a point |
 | `get_mwsid_by_latlon` | `latitude`, `longitude` | Micro-watershed `uid`, plus State, District, and Tehsil |
-| `get_tehsil_data` | `state`, `district`, `tehsil`, `data` | Tehsil datasets, one row per micro-watershed |
+| `get_tehsil_data` | `state`, `district`, `tehsil`, `data` | Tehsil datasets, one row per micro-watershed (always pass one or two names in `data=`) |
 | `get_mws_data` | `state`, `district`, `tehsil`, `mws_id`, `fields` | Fortnight evapotranspiration, runoff, and precipitation |
 | `get_mws_kyl_indicators` | `state`, `district`, `tehsil`, `mws_id`, `fields` | Know Your Landscape indicators for one micro-watershed |
 | `get_generated_layer_urls` | `state`, `district`, `tehsil` | GeoServer layer URLs. Open `layer_url` in QGIS |
 | `get_mws_report` | `state`, `district`, `tehsil`, `mws_id` | Watershed report URL |
-| `get_mws_geometries` | `state`, `district`, `tehsil` | Micro-watershed polygons |
-| `get_village_geometries` | `state`, `district`, `tehsil` | Village polygons |
+| `get_mws_geometries` | `state`, `district`, `tehsil`, `mws_id` | Micro-watershed properties/IDs and bounding boxes (one feature with `mws_id`; full polygons with `include_geometry=true`) |
+| `get_village_geometries` | `state`, `district`, `tehsil`, `village_id` | Village properties/IDs and bounding boxes (one feature with `village_id`; full polygons with `include_geometry=true`) |
 | `get_waterbodies_data_by_admin` | `state`, `district`, `tehsil` | Waterbodies in the tehsil, with seasonal water, zone of influence, and cropping intensity |
 | `get_waterbody_data` | `state`, `district`, `tehsil`, `uid` | One waterbody, same fields as the tehsil list |
 
-The server refuses any path that is not in this list.
+The server refuses any path that is not in this list. To check static parameters against a backend OpenAPI/Swagger document, run `python -m app.catalog <openapi-url-or-file>`. To regenerate `app/generated_docs.py` (dataset names, Swagger parameter docs, and units) from `core-stack-backend`, run `python scripts/generate_catalog_docs.py --github-ref main` (or pass `--backend-dir <path>` for a local checkout).
 
 ## Access log
 
@@ -260,11 +262,12 @@ If `ADMIN_TOKEN` is empty, both routes answer 404.
 | --- | --- | --- |
 | `DATABASE_URL` | `postgresql+asyncpg://corestack:corestack@localhost:5432/corestack_mcp` | Access-log database. Inside Compose the host is `db` |
 | `CORE_STACK_BASE_URL` | `https://geoserver.core-stack.org` | Default CoRE Stack host. A connection can override it with `X-Core-Stack-Base-Url` |
+| `CORE_STACK_OPENAPI_URL` | empty | Optional OpenAPI/Swagger JSON path (relative to `CORE_STACK_BASE_URL`) or full URL used on startup to sync whitelisted route parameters |
 | `CORE_STACK_API_KEY` | empty | Fallback key when the request has no `X-API-Key` |
 | `MCP_ALLOWED_HOSTS` | empty | Hostnames this server accepts. Empty means localhost only |
 | `ADMIN_TOKEN` | empty | Required to read `/access-logs` and `/clients` |
 | `UPSTREAM_TIMEOUT_SECONDS` | `120` | Timeout for one CoRE Stack request |
-| `MAX_RESPONSE_CHARS` | `180000` | Tool responses longer than this are cut and marked `truncated` |
+| `MAX_RESPONSE_CHARS` | `180000` | JSON responses larger than this are trimmed at complete item boundaries with `truncated`, `returned_count`, `total_count`, and `hint` |
 | `TRUST_PROXY` | `false` | When `true`, the client IP is the first `X-Forwarded-For` hop |
 | `LOG_LEVEL` | `INFO` | Process log level |
 
@@ -279,15 +282,24 @@ pytest
 
 Tests use a local SQLite file, `.pytest_mcp.db`, and do not need Postgres.
 
+To also run every documented route example against a live CoRE Stack API:
+
+```bash
+CORE_STACK_LIVE_TEST=1 CORE_STACK_API_KEY="your-key" pytest -v tests/test_examples.py -k live
+```
+
 ## Layout
 
 ```text
-app/main.py        FastAPI app, /health, /access-logs, /clients
-app/mcp_app.py     MCP tools
-app/catalog.py     Allowed CoRE Stack routes
-app/corestack.py   Upstream HTTP client
-app/middleware.py  Reads the caller and writes the access log
-app/models.py             access_logs and clients tables
-docker-compose.yml      Postgres and the MCP server, for your own machine
-deploy/docker-compose.yml  Public server: Caddy, private Postgres, host allowlist
+app/main.py                    FastAPI app, /health, /access-logs, /clients
+app/mcp_app.py                 MCP tools
+app/catalog.py                 Allowed CoRE Stack routes, rich schema docs, and OpenAPI sync
+app/generated_docs.py          Backend-derived dataset names, Swagger parameter docs, and units
+app/corestack.py               Upstream HTTP client
+app/present.py                 Geometry compaction and JSON-safe response truncation
+app/middleware.py              Reads the caller and writes the access log
+app/models.py                  access_logs and clients tables
+scripts/generate_catalog_docs.py  Generates app/generated_docs.py from core-stack-backend
+docker-compose.yml             Postgres and the MCP server, for your own machine
+deploy/docker-compose.yml      Public server: Caddy, private Postgres, host allowlist
 ```

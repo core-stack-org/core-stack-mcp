@@ -9,8 +9,9 @@ from mcp.server.transport_security import TransportSecuritySettings
 from sqlalchemy import desc, select
 from sqlalchemy.engine.url import make_url
 
+from app.catalog import refresh_catalog_from_openapi
 from app.config import get_settings
-from app.corestack import set_http_client
+from app.corestack import normalize_base_url, set_http_client
 from app.db import create_tables, dispose_engine, init_engine, session_factory
 from app.mcp_app import mcp
 from app.middleware import AccessLogMiddleware, McpSlashMiddleware
@@ -49,6 +50,16 @@ mcp_asgi = mcp.streamable_http_app(
 )
 
 
+def _resolved_openapi_url() -> str | None:
+    raw = settings.core_stack_openapi_url.strip()
+    if not raw:
+        return None
+    if raw.startswith(("http://", "https://")):
+        return raw
+    base = normalize_base_url(settings.core_stack_base_url)
+    return base + (raw if raw.startswith("/") else "/" + raw)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     database_url = settings.resolved_database_url()
@@ -57,6 +68,17 @@ async def lifespan(app: FastAPI):
     await create_tables()
     client = httpx.AsyncClient(timeout=settings.upstream_timeout_seconds)
     set_http_client(client)
+    openapi_url = _resolved_openapi_url()
+    if openapi_url:
+        try:
+            changed = await refresh_catalog_from_openapi(client, openapi_url)
+            logger.info("synced OpenAPI parameters from %s changed=%s", openapi_url, changed)
+        except Exception as exc:
+            logger.warning(
+                "failed to sync OpenAPI parameters from %s (using static catalog): %s",
+                openapi_url,
+                exc,
+            )
     logger.info("CoRE Stack MCP listening, upstream %s", settings.core_stack_base_url)
     async with mcp.session_manager.run():
         yield

@@ -1,12 +1,10 @@
 import json
 
 import pytest
-from fastapi.testclient import TestClient
 
 from app.catalog import public_api
-from app.corestack import call_api, normalize_base_url
+from app.corestack import CoreStackAPIError, call_api, normalize_base_url
 from app.identity import CallOutcome, RequestIdentity, identity_var, outcome_var
-from app.main import app
 from app.redact import fingerprint_api_key, parse_mcp_message, redact
 
 
@@ -70,48 +68,52 @@ async def test_call_requires_an_api_key():
         )
     )
     outcome_var.set(CallOutcome())
-    result = await call_api("get_active_locations", {})
-    assert result["status_code"] == 401
-    identity_var.set(None)
-    outcome_var.set(None)
+    try:
+        with pytest.raises(CoreStackAPIError) as exc_info:
+            await call_api("get_active_locations", {})
+        assert exc_info.value.status_code == 401
+        assert "401" in str(exc_info.value)
+        assert "X-API-Key" in str(exc_info.value)
+    finally:
+        identity_var.set(None)
+        outcome_var.set(None)
 
 
-def test_health_and_access_log():
-    with TestClient(app) as client:
-        mcp_response = client.post(
-            "/mcp",
-            json={
-                "jsonrpc": "2.0",
-                "id": 1,
-                "method": "initialize",
-                "params": {
-                    "protocolVersion": "2025-03-26",
-                    "capabilities": {},
-                    "clientInfo": {"name": "pytest", "version": "0"},
-                },
+def test_health_and_access_log(http_client):
+    mcp_response = http_client.post(
+        "/mcp",
+        json={
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2025-03-26",
+                "capabilities": {},
+                "clientInfo": {"name": "pytest", "version": "0"},
             },
-            headers={"Accept": "application/json, text/event-stream"},
-            follow_redirects=False,
-        )
-        assert mcp_response.status_code != 307
+        },
+        headers={"Accept": "application/json, text/event-stream"},
+        follow_redirects=False,
+    )
+    assert mcp_response.status_code != 307
 
-        health = client.get("/health")
-        assert health.status_code == 200
-        assert health.json()["status"] == "ok"
+    health = http_client.get("/health")
+    assert health.status_code == 200
+    assert health.json()["status"] == "ok"
 
-        denied = client.get("/clients", headers={"X-Client-Name": "pytest-user"})
-        assert denied.status_code == 401
+    denied = http_client.get("/clients", headers={"X-Client-Name": "pytest-user"})
+    assert denied.status_code == 401
 
-        listed = client.get(
-            "/access-logs",
-            headers={"X-Admin-Token": "test-admin", "X-Client-Name": "admin"},
-        )
-        assert listed.status_code == 200
-        rows = listed.json()["access_logs"]
-        assert any(row["path"] == "/clients" and row["client_name"] == "pytest-user" for row in rows)
-        assert all(row["path"] != "/health" for row in rows)
-        assert all("api_key" not in json.dumps(row) or row["api_key_fingerprint"] is None or row["api_key_fingerprint"].startswith(("sha256:", "anon:")) for row in rows)
+    listed = http_client.get(
+        "/access-logs",
+        headers={"X-Admin-Token": "test-admin", "X-Client-Name": "admin"},
+    )
+    assert listed.status_code == 200
+    rows = listed.json()["access_logs"]
+    assert any(row["path"] == "/clients" and row["client_name"] == "pytest-user" for row in rows)
+    assert all(row["path"] != "/health" for row in rows)
+    assert all("api_key" not in json.dumps(row) or row["api_key_fingerprint"] is None or row["api_key_fingerprint"].startswith(("sha256:", "anon:")) for row in rows)
 
-        people = client.get("/clients", headers={"X-Admin-Token": "test-admin"})
-        assert people.status_code == 200
-        assert any(item["client_name"] == "pytest-user" for item in people.json()["clients"])
+    people = http_client.get("/clients", headers={"X-Admin-Token": "test-admin"})
+    assert people.status_code == 200
+    assert any(item["client_name"] == "pytest-user" for item in people.json()["clients"])

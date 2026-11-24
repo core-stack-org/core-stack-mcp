@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     postgres_password: str = ""
     postgres_db: str = "corestack_mcp"
     core_stack_base_url: str = "https://geoserver.core-stack.org"
+    core_stack_openapi_url: str = ""
     core_stack_api_key: str = ""
     mcp_allowed_hosts: str = ""
     admin_token: str = ""

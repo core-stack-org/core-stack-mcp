@@ -1,0 +1,53 @@
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+
+# Packaging / build artifacts
+*.egg-info/
+.eggs/
+build/
+dist/
+*.egg
+pip-wheel-metadata/
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# Test, coverage, and linter caches
+.pytest_cache/
+.pytest_mcp.db
+.pytest_mcp.db-*
+.coverage
+.coverage.*
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.nox/
+
+# Local SQLite databases
+*.db
+*.sqlite
+*.sqlite3
+
+# Environment and secret files (keep *.example templates tracked)
+.env
+.env.*
+deploy/.env
+!.env.example
+!deploy/.env.example
+
+# Editor, OS, and local agent files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+skills/system/
